@@ -114,33 +114,52 @@ def demo_analysis(state: AgentState):
     return {"categories": categories, "answers": answers, "brief": brief, "mode": "demo"}
 
 async def run_ai(lead: dict, concerns: list[str]):
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return demo_analysis({"lead": lead, "concerns": concerns})
-    try:
-        from openai import OpenAI
-        from langgraph.graph import StateGraph, END
-        client = OpenAI(api_key=api_key)
-        def analyze_node(state: AgentState):
-            categories = classify(state["concerns"])
-            answers = retrieve_answers(categories)
-            knowledge = "\n".join(f"{x['topic']}: {x['answer']} Source: {x['source']} {x['url']}" for x in answers)
-            prompt = f"""You are NIAT DecisionBridge, a careful education decision-support assistant. Use ONLY the supplied knowledge snippets for factual claims. Never invent fees, scholarships, eligibility, placements, salaries, dates, campus details or admission rules. Mark unknown details for human confirmation. Do not pressure the family.\nLead data: {json.dumps(state['lead'], ensure_ascii=False)}\nConcern categories: {categories}\nVerified knowledge: {knowledge}\nReturn JSON with keys: summary (string), student_priorities (array), parent_objections (array), answers (array of objects with question, answer, source, needs_human_confirmation boolean), unresolved_questions (array), counsellor_next_steps (array), risk_flags (array)."""
-            response = client.chat.completions.create(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), temperature=0.2, response_format={"type":"json_object"}, messages=[{"role":"system","content":"You produce accurate, cautious, source-grounded education decision briefs."},{"role":"user","content":prompt}])
-            data = json.loads(response.choices[0].message.content)
-            brief = "AI-GENERATED DECISION READINESS BRIEF\n\n" + "\n".join(f"{k.replace('_',' ').title()}:\n" + ("\n".join('• '+str(v) for v in val) if isinstance(val,list) else str(val)) for k,val in data.items()) + "\n\nHuman verification is required for all campus-specific, financial and admission details."
-            return {"categories": categories, "answers": answers, "brief": brief, "mode": "openai_langgraph", "structured": data}
-        graph = StateGraph(AgentState)
-        graph.add_node("analyze_and_retrieve", analyze_node)
-        graph.set_entry_point("analyze_and_retrieve")
-        graph.add_edge("analyze_and_retrieve", END)
-        result = graph.compile().invoke({"lead": lead, "concerns": concerns})
-        return result
-    except Exception as exc:
-        result = demo_analysis({"lead": lead, "concerns": concerns})
-        result["mode"] = "demo_fallback"
-        result["warning"] = f"AI unavailable; deterministic fallback used ({type(exc).__name__})."
-        return result
+    api_key = os.getenv("GROQ_API_KEY")
+if not api_key:
+    return {
+        "categories": categories,
+        "answers": answers,
+        "brief": brief,
+        "mode": "demo",
+    }
+
+try:
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1"
+    )
+
+    response = client.chat.completions.create(
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+        temperature=0.2,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": "You produce accurate, cautious, source-grounded education decision briefs."
+            },
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    return {
+        "categories": categories,
+        "answers": answers,
+        "brief": brief,
+        "mode": "groq_langgraph",
+        "structured": data
+    }
+
+except Exception:
+    return {
+        "categories": categories,
+        "answers": answers,
+        "brief": brief,
+        "mode": "demo_fallback"
+    }
 
 @app.get("/api/health")
 def health():
