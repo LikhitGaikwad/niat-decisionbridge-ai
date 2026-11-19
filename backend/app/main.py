@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, Column, String, DateTime, Text, Integer
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 APP_DIR = Path(__file__).resolve().parent
-ROOT_DIR = APP_DIR.parents[2]
+ROOT_DIR = APP_DIR.parents[1]
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./decisionbridge.db")
 if DATABASE_URL.startswith("postgres://"):
