@@ -113,53 +113,90 @@ def demo_analysis(state: AgentState):
     brief = f"DECISION READINESS BRIEF\n\nStudent: {student}\nParent/guardian: {parent}\nGoal: {goal}\n\nSHARED PRIORITY\nHelp the family make an informed decision about whether NIAT's practical, technology-oriented upskilling model and the selected university pathway fit the student's goals.\n\nKEY TOPICS TO DISCUSS\n" + "\n".join(f"• {c}" for c in categories) + "\n\nVERIFIED INFORMATION / CLARIFICATIONS\n" + "\n\n".join(f"• {a['topic']}: {a['answer']} (Source: {a['source']}; {a['url']})" for a in answers) + "\n\nRECOMMENDED COUNSELLOR ACTION\n1. Confirm the exact collaborating university and degree-awarding arrangement for the chosen campus.\n2. Share current written fee, scholarship and admission details; do not rely on estimates.\n3. Address the family's questions above and record which remain unresolved.\n4. Agree on a follow-up date with the student and parent.\n\nSAFETY NOTE\nThis is decision support, not an admission, scholarship, placement or salary guarantee. Human verification is required for campus-specific and time-sensitive details."
     return {"categories": categories, "answers": answers, "brief": brief, "mode": "demo"}
 
+
 async def run_ai(lead: dict, concerns: list[str]):
+    categories = classify(concerns)
+    answers = retrieve_answers(categories)
+
+    student = lead.get("student_name", "The student")
+    parent = lead.get("parent_name") or "Parent/guardian"
+    goal = lead.get("goal") or "Explore technology-focused learning"
+
+    brief = (
+        f"Student: {student}\n"
+        f"Parent/guardian: {parent}\n"
+        f"Goal: {goal}\n"
+        f"Topics: {', '.join(categories)}\n"
+        + "\n".join(
+            f"{a['topic']}: {a['answer']} "
+            f"(Source: {a['source']}; {a['url']})"
+            for a in answers
+        )
+    )
+
     api_key = os.getenv("GROQ_API_KEY")
-if not api_key:
-    return {
-        "categories": categories,
-        "answers": answers,
-        "brief": brief,
-        "mode": "demo",
-    }
 
-try:
-    from openai import OpenAI
+    if not api_key:
+        return {
+            "categories": categories,
+            "answers": answers,
+            "brief": brief,
+            "mode": "demo",
+        }
 
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.groq.com/openai/v1"
-    )
+    try:
+        from openai import OpenAI
 
-    response = client.chat.completions.create(
-        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
-        temperature=0.2,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": "You produce accurate, cautious, source-grounded education decision briefs."
-            },
-            {"role": "user", "content": prompt}
-        ]
-    )
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.groq.com/openai/v1"
+        )
 
-    data = json.loads(response.choices[0].message.content)
-    return {
-        "categories": categories,
-        "answers": answers,
-        "brief": brief,
-        "mode": "groq_langgraph",
-        "structured": data
-    }
+        response = client.chat.completions.create(
+            model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You produce accurate, cautious, "
+                        "source-grounded education decision briefs."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Student: {student}\n"
+                        f"Parent: {parent}\n"
+                        f"Goal: {goal}\n"
+                        f"Concerns: {', '.join(concerns)}\n"
+                        f"Verified information: {brief}\n"
+                        "Return JSON with a single key named "
+                        "'enhanced_brief' containing an improved "
+                        "decision brief. Do not invent facts."
+                    )
+                }
+            ]
+        )
 
-except Exception:
-    return {
-        "categories": categories,
-        "answers": answers,
-        "brief": brief,
-        "mode": "demo_fallback"
-    }
+        data = json.loads(response.choices[0].message.content)
+
+        return {
+            "categories": categories,
+            "answers": answers,
+            "brief": data.get("enhanced_brief", brief),
+            "mode": "groq",
+        }
+
+    except Exception as e:
+        print(f"Groq error: {e}")
+        return {
+            "categories": categories,
+            "answers": answers,
+            "brief": brief,
+            "mode": "demo_fallback",
+        }
 
 @app.get("/api/health")
 def health():
